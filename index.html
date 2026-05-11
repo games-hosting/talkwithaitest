@@ -179,6 +179,11 @@
   }
 
   .status-dot.error { background: var(--red); }
+  .status-dot.speaking {
+    background: var(--amber);
+    box-shadow: 0 0 6px var(--amber), 0 0 12px rgba(255,183,0,0.4);
+    animation: pulse 0.8s ease-in-out infinite;
+  }
 
   @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
@@ -379,7 +384,7 @@
 
 <header>
   <div class="logo">VOICE<span>//</span>TEXT</div>
-  <div class="subtitle">Speech Recognition Interface v1.0</div>
+  <div class="subtitle">Speech Recognition Interface v1.1</div>
 </header>
 
 <div class="card">
@@ -447,10 +452,16 @@
         Firefox does not support this API.
       </div>`;
   } else {
-    let recognition = null;
-    let isListening = false;
+    let recognition    = null;
+    let isListening    = false;
+    let shouldRestart  = false;   // true while user wants mic ON
     let finalTranscript = '';
-    let selectedLang = 'en-US';
+    let selectedLang   = 'en-US';
+
+    // Silence-detection → TTS
+    let silenceTimer   = null;
+    let lastTranscriptForTTS = '';
+    const SILENCE_DELAY = 2000; // ms of no speech before TTS fires
 
     const micBtn     = document.getElementById('mic-btn');
     const clearBtn   = document.getElementById('clear-btn');
@@ -462,14 +473,14 @@
     const errorMsg   = document.getElementById('error-msg');
     const langRow    = document.getElementById('lang-row');
 
-    // Build language buttons
+    // ── Language buttons ──────────────────────────────────────────
     LANGUAGES.forEach(lang => {
       const btn = document.createElement('button');
       btn.className = 'lang-btn' + (lang.code === selectedLang ? ' active' : '');
       btn.textContent = lang.label;
       btn.title = lang.code;
       btn.addEventListener('click', () => {
-        if (isListening) stopListening();
+        if (isListening) { shouldRestart = false; stopListening(); }
         selectedLang = lang.code;
         document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -477,6 +488,7 @@
       langRow.appendChild(btn);
     });
 
+    // ── UI helpers ────────────────────────────────────────────────
     function setStatus(state, text) {
       statusDot.className = 'status-dot' + (state ? ' ' + state : '');
       statusText.textContent = text;
@@ -491,10 +503,7 @@
 
     function renderOutput(interim) {
       outputBox.innerHTML = '';
-      if (finalTranscript) {
-        const final = document.createTextNode(finalTranscript);
-        outputBox.appendChild(final);
-      }
+      if (finalTranscript) outputBox.appendChild(document.createTextNode(finalTranscript));
       if (interim) {
         const span = document.createElement('span');
         span.className = 'interim';
@@ -504,11 +513,67 @@
       outputBox.scrollTop = outputBox.scrollHeight;
     }
 
+    // ── TTS ───────────────────────────────────────────────────────
+    function speakText(text) {
+      text = text.trim();
+      if (!text || !window.speechSynthesis) return;
+
+      window.speechSynthesis.cancel(); // clear any queued speech
+
+      // Web Speech API has a ~200-char per utterance limit in some browsers.
+      // Split on sentence boundaries and chain utterances.
+      const chunks = splitIntoChunks(text, 180);
+      chunks.forEach((chunk, i) => {
+        const utt = new SpeechSynthesisUtterance(chunk);
+        utt.lang = selectedLang;
+        utt.rate = 1;
+        // Show SPEAKING status on first chunk, restore on last
+        if (i === 0) utt.onstart  = () => setStatus('speaking', 'SPEAKING');
+        if (i === chunks.length - 1) {
+          utt.onend = () => {
+            if (shouldRestart) setStatus('listening', 'LISTENING');
+            else setStatus(null, 'STANDBY');
+          };
+        }
+        window.speechSynthesis.speak(utt);
+      });
+    }
+
+    function splitIntoChunks(text, maxLen) {
+      // Try to split on sentence-ending punctuation first
+      const sentences = text.match(/[^.!?]+[.!?]*/g) || [text];
+      const chunks = [];
+      let current = '';
+      for (const s of sentences) {
+        if ((current + s).length > maxLen && current.length > 0) {
+          chunks.push(current.trim());
+          current = s;
+        } else {
+          current += s;
+        }
+      }
+      if (current.trim()) chunks.push(current.trim());
+      return chunks;
+    }
+
+    // ── Silence timer ─────────────────────────────────────────────
+    function resetSilenceTimer() {
+      clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => {
+        const text = finalTranscript.trim();
+        if (text && text !== lastTranscriptForTTS) {
+          lastTranscriptForTTS = text;
+          speakText(text);
+        }
+      }, SILENCE_DELAY);
+    }
+
+    // ── Recognition ───────────────────────────────────────────────
     function buildRecognition() {
       const r = new SpeechRecognition();
-      r.lang = selectedLang;
-      r.continuous = true;
-      r.interimResults = true;
+      r.lang            = selectedLang;
+      r.continuous      = true;
+      r.interimResults  = true;
       r.maxAlternatives = 1;
 
       r.onstart = () => {
@@ -529,46 +594,56 @@
           }
         }
         renderOutput(interim);
+        resetSilenceTimer(); // any result resets the silence clock
       };
 
       r.onerror = (e) => {
         const msgs = {
-          'no-speech':        'NO SPEECH DETECTED',
-          'audio-capture':    'MIC NOT FOUND',
-          'not-allowed':      'MIC PERMISSION DENIED',
-          'network':          'NETWORK ERROR',
-          'aborted':          'ABORTED',
+          'no-speech':     'NO SPEECH DETECTED',
+          'audio-capture': 'MIC NOT FOUND',
+          'not-allowed':   'MIC PERMISSION DENIED',
+          'network':       'NETWORK ERROR',
+          'aborted':       'ABORTED',
         };
-        if (e.error !== 'aborted') {
+        if (e.error !== 'aborted' && e.error !== 'no-speech') {
           showError(msgs[e.error] || ('ERROR: ' + e.error.toUpperCase()));
           setStatus('error', 'ERROR');
         }
+        // 'no-speech' is normal — the onend handler will restart
       };
 
       r.onend = () => {
         isListening = false;
-        setStatus(null, 'STANDBY');
-        micBtn.textContent = '▶ START';
-        micBtn.classList.remove('recording');
-        recognition = null;
+        recognition  = null;
+        // Auto-restart keeps the session alive indefinitely (fixes the 4-5 word cutoff)
+        if (shouldRestart) {
+          setTimeout(startListening, 100);
+        } else {
+          clearTimeout(silenceTimer);
+          micBtn.textContent = '▶ START';
+          micBtn.classList.remove('recording');
+          setStatus(null, 'STANDBY');
+        }
       };
 
       return r;
     }
 
     function startListening() {
-      recognition = buildRecognition();
+      shouldRestart = true;
+      recognition   = buildRecognition();
       recognition.start();
     }
 
     function stopListening() {
-      if (recognition) {
-        recognition.stop();
-      }
+      shouldRestart = false;
+      clearTimeout(silenceTimer);
+      if (recognition) recognition.stop();
     }
 
+    // ── Button handlers ───────────────────────────────────────────
     micBtn.addEventListener('click', () => {
-      if (isListening) {
+      if (shouldRestart || isListening) {
         stopListening();
       } else {
         startListening();
@@ -576,8 +651,10 @@
     });
 
     clearBtn.addEventListener('click', () => {
-      if (isListening) stopListening();
+      stopListening();
+      window.speechSynthesis && window.speechSynthesis.cancel();
       finalTranscript = '';
+      lastTranscriptForTTS = '';
       outputBox.innerHTML = '';
       copyBtn.textContent = '[ COPY ]';
       copyBtn.classList.remove('copied');
