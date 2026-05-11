@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VOICE // TEXT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  :root {
+    --bg:       #0a0c0a;
+    --panel:    #0f120f;
+    --border:   #1a2e1a;
+    --green:    #39ff14;
+    --green-dim:#1a7a06;
+    --green-glow: rgba(57, 255, 20, 0.15);
+    --amber:    #ffb700;
+    --red:      #ff3a3a;
+    --text:     #c8e6c8;
+    --muted:    #4a6b4a;
+    --scanline: rgba(57, 255, 20, 0.03);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+    overflow-x: hidden;
+  }
+
+  /* CRT scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      var(--scanline) 0px,
+      var(--scanline) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  /* Vignette */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.7) 100%);
+    pointer-events: none;
+    z-index: 998;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 2rem;
+    width: 100%;
+    max-width: 700px;
+  }
+
+  .logo {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: clamp(1.8rem, 6vw, 3rem);
+    letter-spacing: 0.3em;
+    color: var(--green);
+    text-shadow:
+      0 0 10px var(--green),
+      0 0 30px rgba(57,255,20,0.4),
+      0 0 60px rgba(57,255,20,0.15);
+    animation: flicker 8s infinite;
+  }
+
+  .logo span { color: var(--muted); }
+
+  .subtitle {
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.4em;
+    margin-top: 0.4rem;
+    text-transform: uppercase;
+  }
+
+  @keyframes flicker {
+    0%,95%,97%,100% { opacity: 1; }
+    96% { opacity: 0.7; }
+    96.5% { opacity: 1; }
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 700px;
+    margin-bottom: 1rem;
+    position: relative;
+  }
+
+  .card-label {
+    position: absolute;
+    top: -0.5rem;
+    left: 1rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.3em;
+    background: var(--panel);
+    padding: 0 0.5rem;
+    color: var(--green-dim);
+    text-transform: uppercase;
+  }
+
+  /* Language selector */
+  .lang-row {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .lang-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+
+  .lang-btn:hover {
+    border-color: var(--green-dim);
+    color: var(--text);
+  }
+
+  .lang-btn.active {
+    border-color: var(--green);
+    color: var(--green);
+    background: var(--green-glow);
+    box-shadow: 0 0 8px rgba(57,255,20,0.2);
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+
+  .status-dot.listening {
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green), 0 0 12px rgba(57,255,20,0.4);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+
+  .status-dot.error { background: var(--red); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(1.3); }
+  }
+
+  #status-text { transition: color 0.3s; }
+
+  /* Waveform */
+  #waveform {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 40px;
+    margin-left: auto;
+  }
+
+  .bar {
+    width: 3px;
+    background: var(--green-dim);
+    border-radius: 2px;
+    height: 4px;
+    transition: background 0.3s;
+  }
+
+  .listening .bar {
+    background: var(--green);
+    animation: wave 0.8s ease-in-out infinite;
+  }
+
+  .bar:nth-child(1) { animation-delay: 0s; }
+  .bar:nth-child(2) { animation-delay: 0.1s; }
+  .bar:nth-child(3) { animation-delay: 0.2s; }
+  .bar:nth-child(4) { animation-delay: 0.3s; }
+  .bar:nth-child(5) { animation-delay: 0.4s; }
+  .bar:nth-child(6) { animation-delay: 0.3s; }
+  .bar:nth-child(7) { animation-delay: 0.2s; }
+  .bar:nth-child(8) { animation-delay: 0.1s; }
+  .bar:nth-child(9) { animation-delay: 0s; }
+
+  @keyframes wave {
+    0%, 100% { height: 4px; }
+    50% { height: 28px; }
+  }
+
+  /* Main mic button */
+  .btn-row {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+  }
+
+  #mic-btn {
+    font-family: 'Orbitron', monospace;
+    font-weight: 700;
+    font-size: 0.75rem;
+    letter-spacing: 0.25em;
+    padding: 0.85rem 2.5rem;
+    border: 1px solid var(--green);
+    background: transparent;
+    color: var(--green);
+    cursor: pointer;
+    border-radius: 2px;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #mic-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--green);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.2s;
+    z-index: -1;
+  }
+
+  #mic-btn:hover::before { transform: scaleX(1); }
+  #mic-btn:hover { color: var(--bg); }
+
+  #mic-btn.recording {
+    border-color: var(--red);
+    color: var(--red);
+    animation: recordBlink 1.5s infinite;
+  }
+
+  #mic-btn.recording::before { display: none; }
+
+  @keyframes recordBlink {
+    0%,100% { box-shadow: 0 0 8px rgba(255,58,58,0.3); }
+    50% { box-shadow: 0 0 20px rgba(255,58,58,0.7); }
+  }
+
+  #clear-btn {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.2em;
+    padding: 0.85rem 1.2rem;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 2px;
+    text-transform: uppercase;
+    transition: all 0.2s;
+  }
+
+  #clear-btn:hover {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+
+  /* Transcript output */
+  #output-box {
+    min-height: 180px;
+    max-height: 380px;
+    overflow-y: auto;
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    position: relative;
+  }
+
+  #output-box:empty::before {
+    content: attr(data-placeholder);
+    color: var(--muted);
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+  }
+
+  .interim {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  /* Scrollbar */
+  #output-box::-webkit-scrollbar { width: 4px; }
+  #output-box::-webkit-scrollbar-track { background: var(--bg); }
+  #output-box::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 2px; }
+
+  /* Copy button */
+  #copy-btn {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 2px;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    display: block;
+    margin-top: 0.75rem;
+    margin-left: auto;
+  }
+
+  #copy-btn:hover { border-color: var(--green-dim); color: var(--text); }
+  #copy-btn.copied { border-color: var(--green); color: var(--green); }
+
+  /* Error message */
+  #error-msg {
+    color: var(--red);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    margin-top: 0.5rem;
+    display: none;
+  }
+
+  /* Footer */
+  footer {
+    margin-top: 1.5rem;
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.3em;
+    text-align: center;
+    opacity: 0.5;
+  }
+
+  .no-support {
+    color: var(--amber);
+    text-align: center;
+    padding: 2rem;
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">VOICE<span>//</span>TEXT</div>
+  <div class="subtitle">Speech Recognition Interface v1.0</div>
+</header>
+
+<div class="card">
+  <span class="card-label">// language</span>
+  <div class="lang-row" id="lang-row"></div>
+</div>
+
+<div class="card">
+  <span class="card-label">// status</span>
+  <div class="status-bar" id="status-bar">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">STANDBY</span>
+    <div id="waveform">
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <span class="card-label">// controls</span>
+  <div class="btn-row">
+    <button id="mic-btn">&#9654; START</button>
+    <button id="clear-btn">CLR</button>
+  </div>
+  <div id="error-msg"></div>
+</div>
+
+<div class="card">
+  <span class="card-label">// transcript</span>
+  <div id="output-box" data-placeholder="_ waiting for input..."></div>
+  <button id="copy-btn">[ COPY ]</button>
+</div>
+
+<footer>USES WEB SPEECH API &nbsp;|&nbsp; REQUIRES MIC PERMISSION</footer>
+
+<script>
+  const LANGUAGES = [
+    { code: 'en-US', label: 'EN' },
+    { code: 'sv-SE', label: 'SV' },
+    { code: 'de-DE', label: 'DE' },
+    { code: 'fr-FR', label: 'FR' },
+    { code: 'es-ES', label: 'ES' },
+    { code: 'fi-FI', label: 'FI' },
+    { code: 'no-NO', label: 'NO' },
+    { code: 'da-DK', label: 'DA' },
+    { code: 'nl-NL', label: 'NL' },
+    { code: 'it-IT', label: 'IT' },
+    { code: 'pl-PL', label: 'PL' },
+    { code: 'pt-BR', label: 'PT' },
+    { code: 'ja-JP', label: 'JA' },
+    { code: 'zh-CN', label: 'ZH' },
+    { code: 'ko-KR', label: 'KO' },
+    { code: 'ar-SA', label: 'AR' },
+  ];
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    document.body.innerHTML = `
+      <div class="no-support">
+        ⚠ WEB SPEECH API NOT SUPPORTED<br><br>
+        Please use Chrome, Edge, or Safari.<br>
+        Firefox does not support this API.
+      </div>`;
+  } else {
+    let recognition = null;
+    let isListening = false;
+    let finalTranscript = '';
+    let selectedLang = 'en-US';
+
+    const micBtn     = document.getElementById('mic-btn');
+    const clearBtn   = document.getElementById('clear-btn');
+    const copyBtn    = document.getElementById('copy-btn');
+    const outputBox  = document.getElementById('output-box');
+    const statusDot  = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const waveform   = document.getElementById('waveform');
+    const errorMsg   = document.getElementById('error-msg');
+    const langRow    = document.getElementById('lang-row');
+
+    // Build language buttons
+    LANGUAGES.forEach(lang => {
+      const btn = document.createElement('button');
+      btn.className = 'lang-btn' + (lang.code === selectedLang ? ' active' : '');
+      btn.textContent = lang.label;
+      btn.title = lang.code;
+      btn.addEventListener('click', () => {
+        if (isListening) stopListening();
+        selectedLang = lang.code;
+        document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+      langRow.appendChild(btn);
+    });
+
+    function setStatus(state, text) {
+      statusDot.className = 'status-dot' + (state ? ' ' + state : '');
+      statusText.textContent = text;
+      waveform.className = state === 'listening' ? 'listening' : '';
+    }
+
+    function showError(msg) {
+      errorMsg.textContent = '⚠ ' + msg;
+      errorMsg.style.display = 'block';
+      setTimeout(() => { errorMsg.style.display = 'none'; }, 5000);
+    }
+
+    function renderOutput(interim) {
+      outputBox.innerHTML = '';
+      if (finalTranscript) {
+        const final = document.createTextNode(finalTranscript);
+        outputBox.appendChild(final);
+      }
+      if (interim) {
+        const span = document.createElement('span');
+        span.className = 'interim';
+        span.textContent = (finalTranscript ? ' ' : '') + interim;
+        outputBox.appendChild(span);
+      }
+      outputBox.scrollTop = outputBox.scrollHeight;
+    }
+
+    function buildRecognition() {
+      const r = new SpeechRecognition();
+      r.lang = selectedLang;
+      r.continuous = true;
+      r.interimResults = true;
+      r.maxAlternatives = 1;
+
+      r.onstart = () => {
+        isListening = true;
+        setStatus('listening', 'LISTENING');
+        micBtn.textContent = '■ STOP';
+        micBtn.classList.add('recording');
+      };
+
+      r.onresult = (e) => {
+        let interim = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) {
+            finalTranscript += t + ' ';
+          } else {
+            interim += t;
+          }
+        }
+        renderOutput(interim);
+      };
+
+      r.onerror = (e) => {
+        const msgs = {
+          'no-speech':        'NO SPEECH DETECTED',
+          'audio-capture':    'MIC NOT FOUND',
+          'not-allowed':      'MIC PERMISSION DENIED',
+          'network':          'NETWORK ERROR',
+          'aborted':          'ABORTED',
+        };
+        if (e.error !== 'aborted') {
+          showError(msgs[e.error] || ('ERROR: ' + e.error.toUpperCase()));
+          setStatus('error', 'ERROR');
+        }
+      };
+
+      r.onend = () => {
+        isListening = false;
+        setStatus(null, 'STANDBY');
+        micBtn.textContent = '▶ START';
+        micBtn.classList.remove('recording');
+        recognition = null;
+      };
+
+      return r;
+    }
+
+    function startListening() {
+      recognition = buildRecognition();
+      recognition.start();
+    }
+
+    function stopListening() {
+      if (recognition) {
+        recognition.stop();
+      }
+    }
+
+    micBtn.addEventListener('click', () => {
+      if (isListening) {
+        stopListening();
+      } else {
+        startListening();
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      if (isListening) stopListening();
+      finalTranscript = '';
+      outputBox.innerHTML = '';
+      copyBtn.textContent = '[ COPY ]';
+      copyBtn.classList.remove('copied');
+    });
+
+    copyBtn.addEventListener('click', () => {
+      const text = outputBox.innerText.trim();
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = '[ COPIED ✓ ]';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.textContent = '[ COPY ]';
+          copyBtn.classList.remove('copied');
+        }, 2000);
+      });
+    });
+  }
+</script>
+</body>
+</html>
